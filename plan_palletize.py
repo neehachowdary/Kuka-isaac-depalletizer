@@ -3,6 +3,7 @@ import numpy as np
 from curobo.types.base import TensorDeviceType
 from curobo.types.robot import RobotConfig
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
+from curobo.rollout.cost.pose_cost import PoseCostMetric
 from curobo.types.math import Pose
 from curobo.types.state import JointState
 from curobo.util_file import load_yaml, get_robot_configs_path, join_path
@@ -21,7 +22,7 @@ print("Setting up motion planner...")
 world_cfg = WorldConfig(
     cuboid=[Cuboid(name="dummy", pose=[10, 10, 10, 1, 0, 0, 0], dims=[0.01, 0.01, 0.01])]
 )
-motion_gen_config = MotionGenConfig.load_from_robot_config(robot_cfg, world_cfg, tensor_args=tensor_args)
+motion_gen_config = MotionGenConfig.load_from_robot_config(robot_cfg, world_cfg, tensor_args=tensor_args, high_precision=True)
 motion_gen = MotionGen(motion_gen_config)
 motion_gen.warmup()
 
@@ -33,8 +34,11 @@ start_state = JointState.from_position(
 )
 
 def plan_and_extend(start, goal_pose_list, all_positions, label):
+    import time as time_module
+    t_start = time_module.time()
     goal_pose = Pose.from_list(goal_pose_list)
     result = motion_gen.plan_single(start, goal_pose, MotionGenPlanConfig(max_attempts=15))
+    t_elapsed = time_module.time() - t_start
     if not result.success.item():
         print(f"FAILED at {label}:", result.status)
         return None, None
@@ -45,7 +49,7 @@ def plan_and_extend(start, goal_pose_list, all_positions, label):
         torch.tensor(pos[-1], device="cuda:0").view(1, -1),
         joint_names=motion_gen.kinematics.joint_names,
     )
-    print(f"  {label}: {len(pos)} waypoints")
+    print(f"  {label}: {len(pos)} waypoints, {t_elapsed:.3f}s")
     return new_start, pos
 
 usd_stage = Usd.Stage.Open("C:/Users/NehaaChowdary/Documents/newware_house.usd")
@@ -58,17 +62,16 @@ for i in range(4):
     print(f"Real box_{i} position: {pos}")
 
 conveyor_x = 1.3
-conveyor_place_ys = [0.3, 0.55, 0.8, 1.05]
+conveyor_place_ys = [0.3, 0.55, 0.8, 0.9]
 conveyor_top_z = 0.06
 approach_height = 0.15
 grasp_offset = 0.02
 place_clearance = 0.08
 
-
 all_waypoints = []
 segment_info = []
 current_state = start_state
-pick_order = [3, 2, 1, 0]
+pick_order = [0, 1, 2, 3]
 
 for box_num, box_idx in enumerate(pick_order):
     bx, by, bz = box_positions_real[box_idx]
@@ -76,13 +79,25 @@ for box_num, box_idx in enumerate(pick_order):
 
     print(f"\n--- Box {box_idx} (pick #{box_num+1}) ---")
 
-    current_state, seg = plan_and_extend(current_state,
-        [bx, by, bz + approach_height, 0.0, 1.0, 0.0, 0.0], all_waypoints, "approach")
-    segment_info.append((box_idx, "approach", len(seg) if seg is not None else 0))
-
-    current_state, seg = plan_and_extend(current_state,
-        [bx, by, bz + grasp_offset, 0.0, 1.0, 0.0, 0.0], all_waypoints, "descend_grasp")
-    segment_info.append((box_idx, "descend_grasp", len(seg) if seg is not None else 0))
+    grasp_pose_metric = PoseCostMetric.create_grasp_approach_metric(
+        offset_position=approach_height,
+        tstep_fraction=0.6,
+        linear_axis=2
+    )
+    goal_pose = Pose.from_list([bx, by, bz + grasp_offset, 0.0, 1.0, 0.0, 0.0])
+    result = motion_gen.plan_single(current_state, goal_pose, MotionGenPlanConfig(max_attempts=15, pose_cost_metric=grasp_pose_metric))
+    if not result.success.item():
+        print("FAILED at approach_and_grasp:", result.status)
+    else:
+        traj = result.get_interpolated_plan()
+        pos = traj.position.cpu().numpy()
+        all_waypoints.append(pos)
+        current_state = JointState.from_position(
+            torch.tensor(pos[-1], device="cuda:0").view(1, -1),
+            joint_names=motion_gen.kinematics.joint_names,
+        )
+        segment_info.append((box_idx, "approach_and_grasp", len(pos)))
+        print(f"  approach_and_grasp: {len(pos)} waypoints")
 
     current_state, seg = plan_and_extend(current_state,
         [bx, by, bz + approach_height, 0.0, 1.0, 0.0, 0.0], all_waypoints, "lift")

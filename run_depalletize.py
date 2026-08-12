@@ -44,7 +44,7 @@ release_indices = []
 box_order = []
 
 for box_idx, stage_name, length in segment_info:
-    if stage_name == "descend_grasp":
+    if stage_name == "approach_and_grasp":
         grasp_indices.append(idx + length - 1)
         box_order.append(box_idx)
     if stage_name == "descend_place":
@@ -73,6 +73,9 @@ for i, waypoint in enumerate(positions):
         held_box_idx = box_order[box_num]
         held_box_prim = stage.GetPrimAtPath(f"/World/box_{held_box_idx}")
 
+        for _ in range(100):
+            world.step(render=True)
+
         ee_prim = stage.GetPrimAtPath(ee_link_path)
         ee_xform = UsdGeom.Xformable(ee_prim)
         ee_pos = ee_xform.ComputeLocalToWorldTransform(0).ExtractTranslation()
@@ -81,7 +84,10 @@ for i, waypoint in enumerate(positions):
         box_pos = box_xform.ComputeLocalToWorldTransform(0).ExtractTranslation()
 
         grip_offset = Gf.Vec3d(box_pos[0] - ee_pos[0], box_pos[1] - ee_pos[1], box_pos[2] - ee_pos[2])
-        print(f">>> GRASPING box_{held_box_idx}, offset={grip_offset}")
+        print(f">>> GRASPING box_{held_box_idx}")
+        print(f"    RAW ee_pos={ee_pos}")
+        print(f"    RAW box_pos={box_pos}")
+        print(f"    offset={grip_offset}")
 
     if i in release_indices:
         box_num = release_indices.index(i)
@@ -108,7 +114,7 @@ for i, waypoint in enumerate(positions):
                 if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
                     op.Set(Gf.Vec3d(ee_pos[0] + grip_offset[0], ee_pos[1] + grip_offset[1], ee_pos[2] + grip_offset[2]))
 
-    time.sleep(0.02)
+    time.sleep(0.02 if held_box_prim is None else 0.06)
 
 print("Depalletization complete! Window stays open - close manually.")
 
