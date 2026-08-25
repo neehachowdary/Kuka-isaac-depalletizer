@@ -18,40 +18,26 @@ tensor_args = TensorDeviceType()
 config_file = load_yaml(join_path(get_robot_configs_path(), "kr50_r2500.yml"))
 robot_cfg = RobotConfig.from_dict(config_file["robot_cfg"])
 
-print("Setting up motion planner...")
 world_cfg = WorldConfig(
-    cuboid=[
-        Cuboid(name="dummy", pose=[10, 10, 10, 1, 0, 0, 0], dims=[0.01, 0.01, 0.01])
-    ]
+    cuboid=[Cuboid(name="dummy", pose=[10, 10, 10, 1, 0, 0, 0], dims=[0.01, 0.01, 0.01])]
 )
 motion_gen_config = MotionGenConfig.load_from_robot_config(robot_cfg, world_cfg, tensor_args=tensor_args, high_precision=True, use_cuda_graph=False)
 motion_gen = MotionGen(motion_gen_config)
 motion_gen.warmup()
 
-print("Computing start state...")
 retract_cfg = motion_gen.get_retract_config()
-start_state = JointState.from_position(
-    retract_cfg.view(1, -1),
-    joint_names=motion_gen.kinematics.joint_names,
-)
+start_state = JointState.from_position(retract_cfg.view(1, -1), joint_names=motion_gen.kinematics.joint_names)
 
 def plan_and_extend(start, goal_pose_list, all_positions, label):
-    import time as time_module
-    t_start = time_module.time()
     goal_pose = Pose.from_list(goal_pose_list)
     result = motion_gen.plan_single(start, goal_pose, MotionGenPlanConfig(max_attempts=15))
-    t_elapsed = time_module.time() - t_start
     if not result.success.item():
         print(f"FAILED at {label}:", result.status)
         return None, None
-    traj = result.get_interpolated_plan()
-    pos = traj.position.cpu().numpy()
+    pos = result.get_interpolated_plan().position.cpu().numpy()
     all_positions.append(pos)
-    new_start = JointState.from_position(
-        torch.tensor(pos[-1], device="cuda:0").view(1, -1),
-        joint_names=motion_gen.kinematics.joint_names,
-    )
-    print(f"  {label}: {len(pos)} waypoints, {t_elapsed:.3f}s")
+    new_start = JointState.from_position(torch.tensor(pos[-1], device="cuda:0").view(1, -1), joint_names=motion_gen.kinematics.joint_names)
+    print(f"  {label}: {len(pos)} waypoints")
     return new_start, pos
 
 usd_stage = Usd.Stage.Open("C:/Users/NehaaChowdary/Documents/newware_house.usd")
@@ -59,8 +45,7 @@ box_positions_real = []
 box_half_size = 0.08
 for i in range(4):
     prim = usd_stage.GetPrimAtPath(f"/World/box_{i}")
-    xform = UsdGeom.Xformable(prim)
-    pos = xform.ComputeLocalToWorldTransform(0).ExtractTranslation()
+    pos = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0).ExtractTranslation()
     box_positions_real.append((pos[0], pos[1], pos[2]))
     print(f"Real box_{i} position: {pos}")
 
@@ -73,7 +58,7 @@ place_clearance = 0.08
 all_waypoints = []
 segment_info = []
 current_state = start_state
-pick_order = [0, 1]
+pick_order = [3, 2, 1, 0]
 
 for box_num, box_idx in enumerate(pick_order):
     bx, by, bz = box_positions_real[box_idx]
@@ -81,21 +66,15 @@ for box_num, box_idx in enumerate(pick_order):
 
     print(f"\n--- Box {box_idx} (pick #{box_num+1}) ---")
 
-    grasp_pose_metric = PoseCostMetric.create_grasp_approach_metric(
-        offset_position=approach_height, tstep_fraction=0.6, linear_axis=2
-    )
+    grasp_pose_metric = PoseCostMetric.create_grasp_approach_metric(offset_position=approach_height, tstep_fraction=0.6, linear_axis=2)
     goal_pose = Pose.from_list([bx, by, bz + box_half_size, 0.0, 1.0, 0.0, 0.0])
     result = motion_gen.plan_single(current_state, goal_pose, MotionGenPlanConfig(max_attempts=15, pose_cost_metric=grasp_pose_metric))
     if not result.success.item():
         print("FAILED at approach_and_grasp:", result.status)
     else:
-        traj = result.get_interpolated_plan()
-        pos = traj.position.cpu().numpy()
+        pos = result.get_interpolated_plan().position.cpu().numpy()
         all_waypoints.append(pos)
-        current_state = JointState.from_position(
-            torch.tensor(pos[-1], device="cuda:0").view(1, -1),
-            joint_names=motion_gen.kinematics.joint_names,
-        )
+        current_state = JointState.from_position(torch.tensor(pos[-1], device="cuda:0").view(1, -1), joint_names=motion_gen.kinematics.joint_names)
         segment_info.append((box_idx, "approach_and_grasp", len(pos)))
         print(f"  approach_and_grasp: {len(pos)} waypoints")
 
@@ -105,39 +84,16 @@ for box_num, box_idx in enumerate(pick_order):
     current_state, seg = plan_and_extend(current_state, [px, py, pz + approach_height, 0.0, 1.0, 0.0, 0.0], all_waypoints, "move_to_conveyor")
     segment_info.append((box_idx, "move_to_conveyor", len(seg) if seg is not None else 0))
 
-    positions_list = [
-        [conveyor_x, 0.4, pz + place_clearance],
-        [conveyor_x, 0.55, pz + place_clearance],
-        [conveyor_x, 0.7, pz + place_clearance],
-    ]
-    quaternions_list = [[0.0, 1.0, 0.0, 0.0]] * 3
-
-    pos_tensor = torch.tensor(positions_list, device="cuda:0").unsqueeze(0)
-    quat_tensor = torch.tensor(quaternions_list, device="cuda:0").unsqueeze(0)
-
-    goalset_pose = Pose(position=pos_tensor, quaternion=quat_tensor)
-    result = motion_gen.plan_goalset(current_state, goalset_pose, MotionGenPlanConfig(max_attempts=15))
-    if not result.success.item():
-        print("FAILED at descend_place (goalset):", result.status)
-    else:
-        traj = result.get_interpolated_plan()
-        pos = traj.position.cpu().numpy()
-        all_waypoints.append(pos)
-        current_state = JointState.from_position(
-            torch.tensor(pos[-1], device="cuda:0").view(1, -1),
-            joint_names=motion_gen.kinematics.joint_names,
-        )
-        segment_info.append((box_idx, "descend_place", len(pos)))
-        print(f"  descend_place (goalset): {len(pos)} waypoints, chose index {result.goalset_index}")
+    current_state, seg = plan_and_extend(current_state, [px, py, pz + place_clearance, 0.0, 1.0, 0.0, 0.0], all_waypoints, "descend_place")
+    segment_info.append((box_idx, "descend_place", len(seg) if seg is not None else 0))
 
     current_state, seg = plan_and_extend(current_state, [px, py, pz + approach_height, 0.0, 1.0, 0.0, 0.0], all_waypoints, "retreat")
     segment_info.append((box_idx, "retreat", len(seg) if seg is not None else 0))
 
 if all(w is not None for w in all_waypoints):
     full_trajectory = np.concatenate(all_waypoints, axis=0)
-    np.save("C:/Users/NehaaChowdary/warehouse/depalletize_trajectory.npy", full_trajectory)
-    np.save("C:/Users/NehaaChowdary/warehouse/depalletize_segments.npy", np.array(segment_info, dtype=object), allow_pickle=True)
+    np.save("C:/Users/NehaaChowdary/warehouse/01_basic_pick_and_place/depalletize_trajectory.npy", full_trajectory)
+    np.save("C:/Users/NehaaChowdary/warehouse/01_basic_pick_and_place/depalletize_segments.npy", np.array(segment_info, dtype=object), allow_pickle=True)
     print(f"\nSaved: {full_trajectory.shape[0]} total waypoints")
-    print("Pick order:", pick_order)
 else:
     print("\nOne or more stages FAILED - check output above")

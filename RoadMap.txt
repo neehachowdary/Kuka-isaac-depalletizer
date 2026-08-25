@@ -1,0 +1,36 @@
+# KUKA Depalletization PoC — Roadmap
+
+## Aim
+Demonstrate autonomous robot depalletization (pick-and-place) using KUKA KR50 + Isaac Sim + cuRobo, 
+with the ability to detect and report *why* motion planning fails (e.g., unreachable pose, collision, no valid trajectory) — a diagnostic capability 
+the current Real Time Robots (RTR) simulator lacks. Alongside this, ensure the pipeline is built in a way that can be packaged and transferred cleanly — to real hardware, to another environment, 
+or to another team member — rather than being a one-off setup that only runs in its original configuration.
+
+## Phase 2 — Diagnostics, Motion Quality & Gripper 🔧 IN PROGRESS
+*Primary focus right now: better failure diagnostics and performance, motion smoothness, and getting a real gripper attached — ahead of adding scene complexity.*
+
+**Diagnostics — two distinct layers identified:**
+- **Setup/config-time diagnostics** (already strong, built into cuRobo itself): e.g., clear tracebacks when a required world-collision object is missing or misconfigured. Verified this works well — errors point to the exact cause and are directly actionable.
+- **Runtime motion-outcome diagnostics** (the actual PoC differentiator vs. RTR — still to formalize): distinguishing *why* a specific pick/place attempt fails or succeeds imprecisely:
+  - Unreachable pose (IK failure)
+  - Collision (self-collision or obstacle collision)
+  - No valid trajectory found
+  - "Succeeded" but landed outside acceptable precision (seen in testing — see below)
+
+**Performance measurement — started:**
+- [ ] Added per-stage timing instrumentation to planning script (typical single-stage plan: ~70-110ms on current hardware)
+- [ ] Add total end-to-end sequence timing (sum across all picks) for baseline performance tracking
+
+**Motion smoothness / redundancy — root cause identified, fix in progress:**
+- Confirmed issue is **sequence-position-dependent**, not tied to a specific box: whichever pick is *last* in a chain tends to show larger positional error / visible swing, regardless of which physical box occupies that slot
+- Root cause: each of the 24 (or fewer) pick/place stages is solved as an **independent** optimization call — no shared optimization across the full sequence, so small numerical imprecision can compound by the time the chain reaches its final stage
+- Approaches tested so far: seed-fixing for reproducibility, joint angle unwrapping, wrist-joint locking (post-hoc and pre-hoc), null-space weight tuning (10.0, 3.0 — no measurable difference), increased optimizer attempts, resetting seed to home before each pick (made results worse, reverted)
+- **Currently testing:** cuRobo's built-in `high_precision=True` mode (added specifically by NVIDIA for sub-millimeter convergence) — directly targets the "succeeds but lands imprecisely" pattern observed
+- **Longer-term proper fix:** plan the full multi-box sequence as one continuous trajectory optimization instead of chaining independent single-pose solves
+
+**Gripper integration — needed for the box to visually/physically attach to the robot, instead of floating near the end-effector:**
+- [ ] Attach a gripper model to the robot's end-effector (`tool0`) — either a simple placeholder (two-finger box geometry) or a real gripper asset (e.g., Robotiq)
+- [ ] Use Isaac Sim's **Grasp Editor** to author real grasp poses for the gripper closing on the box shape, exporting an `isaac_grasp` YAML file
+  - Note: the Grasp Editor requires an existing gripper Articulation to author grasps *on* — it does not create the gripper itself, so gripper attachment (above) must come first
+- [ ] Integrate the authored grasp into the pick-and-place script, replacing the current manual offset-tracking approach
+- **Est: 2–3 sessions** (combined scope)
