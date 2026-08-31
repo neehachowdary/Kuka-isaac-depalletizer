@@ -21,7 +21,11 @@ robot_cfg = RobotConfig.from_dict(config_file["robot_cfg"])
 print("Setting up motion planner...")
 world_cfg = WorldConfig(
     cuboid=[
-        Cuboid(name="dummy", pose=[10, 10, 10, 1, 0, 0, 0], dims=[0.01, 0.01, 0.01])
+        Cuboid(
+            name="static_obstacle",
+            pose=[1.3, -0.3, 0.15, 1, 0, 0, 0],
+            dims=[0.8, 0.1, 0.6]
+        )
     ]
 )
 motion_gen_config = MotionGenConfig.load_from_robot_config(robot_cfg, world_cfg, tensor_args=tensor_args, high_precision=True, use_cuda_graph=False)
@@ -73,7 +77,9 @@ place_clearance = 0.08
 all_waypoints = []
 segment_info = []
 current_state = start_state
-pick_order = [0, 1]
+pick_order = [3, 2, 1, 0]
+
+used_y_positions = []
 
 for box_num, box_idx in enumerate(pick_order):
     bx, by, bz = box_positions_real[box_idx]
@@ -110,7 +116,10 @@ for box_num, box_idx in enumerate(pick_order):
         [conveyor_x, 0.55, pz + place_clearance],
         [conveyor_x, 0.7, pz + place_clearance],
     ]
-    quaternions_list = [[0.0, 1.0, 0.0, 0.0]] * 3
+    all_y_candidates = [0.3, 0.4, 0.55, 0.7, 0.85]
+    available_ys = [y for y in all_y_candidates if y not in used_y_positions]
+    positions_list = [[conveyor_x, y, pz + place_clearance] for y in available_ys[:3]]
+    quaternions_list = [[0.0, 1.0, 0.0, 0.0]] * len(positions_list)
 
     pos_tensor = torch.tensor(positions_list, device="cuda:0").unsqueeze(0)
     quat_tensor = torch.tensor(quaternions_list, device="cuda:0").unsqueeze(0)
@@ -130,6 +139,8 @@ for box_num, box_idx in enumerate(pick_order):
         segment_info.append((box_idx, "descend_place", len(pos)))
         print(f"  descend_place (goalset): {len(pos)} waypoints, chose index {result.goalset_index}")
 
+        chosen_y = available_ys[result.goalset_index]
+        used_y_positions.append(chosen_y)
     current_state, seg = plan_and_extend(current_state, [px, py, pz + approach_height, 0.0, 1.0, 0.0, 0.0], all_waypoints, "retreat")
     segment_info.append((box_idx, "retreat", len(seg) if seg is not None else 0))
 

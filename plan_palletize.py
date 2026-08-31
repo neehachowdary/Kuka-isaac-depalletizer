@@ -73,7 +73,7 @@ place_clearance = 0.08
 all_waypoints = []
 segment_info = []
 current_state = start_state
-pick_order = [0, 1]
+pick_order = [3, 2, 1, 0]
 
 for box_num, box_idx in enumerate(pick_order):
     bx, by, bz = box_positions_real[box_idx]
