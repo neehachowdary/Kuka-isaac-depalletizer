@@ -15,7 +15,7 @@ np.random.seed(42)
 
 print("Loading robot config...")
 tensor_args = TensorDeviceType()
-config_file = load_yaml(join_path(get_robot_configs_path(), "kr50_r2500.yml"))
+config_file = load_yaml("kr50_r2500_low_jerk.yml")
 robot_cfg = RobotConfig.from_dict(config_file["robot_cfg"])
 
 world_cfg = WorldConfig(
@@ -34,7 +34,9 @@ def plan_and_extend(start, goal_pose_list, all_positions, label):
     if not result.success.item():
         print(f"FAILED at {label}:", result.status)
         return None, None
-    pos = result.get_interpolated_plan().position.cpu().numpy()
+    traj_obj = result.get_interpolated_plan()
+    pos = traj_obj.position.cpu().numpy()
+    print(f"    Interpolation dt: {traj_obj.dt if hasattr(traj_obj, 'dt') else 'unknown'}")
     all_positions.append(pos)
     new_start = JointState.from_position(torch.tensor(pos[-1], device="cuda:0").view(1, -1), joint_names=motion_gen.kinematics.joint_names)
     print(f"  {label}: {len(pos)} waypoints")
@@ -72,7 +74,9 @@ for box_num, box_idx in enumerate(pick_order):
     if not result.success.item():
         print("FAILED at approach_and_grasp:", result.status)
     else:
-        pos = result.get_interpolated_plan().position.cpu().numpy()
+        traj_obj = result.get_interpolated_plan()
+        pos = traj_obj.position.cpu().numpy()
+        print(f"    Interpolation dt: {traj_obj.dt if hasattr(traj_obj, 'dt') else 'unknown'}")
         all_waypoints.append(pos)
         current_state = JointState.from_position(torch.tensor(pos[-1], device="cuda:0").view(1, -1), joint_names=motion_gen.kinematics.joint_names)
         segment_info.append((box_idx, "approach_and_grasp", len(pos)))
@@ -84,7 +88,9 @@ for box_num, box_idx in enumerate(pick_order):
     if not result.success.item():
         print("FAILED at lift_and_carry:", result.status)
     else:
-        pos = result.get_interpolated_plan().position.cpu().numpy()
+        traj_obj = result.get_interpolated_plan()
+        pos = traj_obj.position.cpu().numpy()
+        print(f"    Interpolation dt: {traj_obj.dt if hasattr(traj_obj, 'dt') else 'unknown'}")
         all_waypoints.append(pos)
         current_state = JointState.from_position(torch.tensor(pos[-1], device="cuda:0").view(1, -1), joint_names=motion_gen.kinematics.joint_names)
         segment_info.append((box_idx, "lift_and_carry", len(pos)))
@@ -96,7 +102,9 @@ for box_num, box_idx in enumerate(pick_order):
     if not result.success.item():
         print("FAILED at descend_place:", result.status)
     else:
-        pos = result.get_interpolated_plan().position.cpu().numpy()
+        traj_obj = result.get_interpolated_plan()
+        pos = traj_obj.position.cpu().numpy()
+        print(f"    Interpolation dt: {traj_obj.dt if hasattr(traj_obj, 'dt') else 'unknown'}")
         all_waypoints.append(pos)
         current_state = JointState.from_position(torch.tensor(pos[-1], device="cuda:0").view(1, -1), joint_names=motion_gen.kinematics.joint_names)
         segment_info.append((box_idx, "descend_place", len(pos)))

@@ -1,0 +1,64 @@
+robot_cfg:
+  kinematics:
+    usd_path: ""
+    usd_robot_root: "/robot"
+    isaac_usd_path: ""
+    usd_flip_joints: {}
+    usd_flip_joint_limits: []
+    urdf_path: "C:/Users/NehaaChowdary/kuka_robot_descriptions/kr50_r2500.urdf"
+    asset_root_path: ""
+    base_link: "base_link"
+    ee_link: "tool0"
+    link_names: null
+    lock_joints: null
+    extra_links: null
+    collision_link_names: ["base_link", "link_1", "link_2", "link_3", "link_4", "link_5", "link_6", "tool0"]
+    collision_spheres:
+      base_link:
+        - "center": [0.0, 0.0, 0.1]
+          "radius": 0.15
+      link_1:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.15
+      link_2:
+        - "center": [0.0, 0.0, 0.3]
+          "radius": 0.13
+        - "center": [0.0, 0.0, 0.6]
+          "radius": 0.13
+      link_3:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.12
+      link_4:
+        - "center": [0.0, 0.0, 0.2]
+          "radius": 0.1
+      link_5:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.09
+      link_6:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.08
+      tool0:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.06
+    collision_sphere_buffer: 0.005
+    extra_collision_spheres: {}
+    self_collision_ignore:
+      base_link: ["link_1"]
+      link_1: ["base_link", "link_2"]
+      link_2: ["link_1", "link_3"]
+      link_3: ["link_2", "link_4"]
+      link_4: ["link_3", "link_5"]
+      link_5: ["link_4", "link_6"]
+      link_6: ["link_5", "tool0"]
+      tool0: ["link_6"]
+    self_collision_buffer: {}
+    use_global_cumul: True
+    mesh_link_names: null
+    external_asset_path: null
+    cspace:
+      joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
+      retract_config: [0.0, -1.5708, 1.5708, 0.0, 0.0, 0.0]
+      null_space_weight: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
+      cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+      max_jerk: 100.0
+      max_acceleration: 5.0
